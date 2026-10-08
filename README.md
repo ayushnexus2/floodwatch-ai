@@ -37,3 +37,4 @@ For browser access, the Lambda Function URL must return a CORS header such as:
 `Access-Control-Allow-Origin: *`
 
 The Lambda test response shown during setup already returned this header.
+# floodwatch-ai6
