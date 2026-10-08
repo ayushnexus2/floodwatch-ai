@@ -129,6 +129,9 @@ async def analyze(
     lat: float = Query(..., ge=-90, le=90),
     lon: float = Query(..., ge=-180, le=180),
 ):
+    weather = {"current": {}, "hourly": {"precipitation": []}}
+    flood = {"daily": {"time": [], "river_discharge": []}}
+
     try:
         weather = await get_json(
             "https://api.open-meteo.com/v1/forecast",
@@ -141,7 +144,10 @@ async def analyze(
                 "timezone": "auto",
             },
         )
+    except Exception:
+        weather = {"current": {}, "hourly": {"precipitation": []}}
 
+    try:
         # GloFAS-based modelled river discharge. This is NOT a live gauge reading.
         flood = await get_json(
             "https://flood-api.open-meteo.com/v1/flood",
@@ -154,68 +160,65 @@ async def analyze(
                 "timezone": "auto",
             },
         )
+    except Exception:
+        flood = {"daily": {"time": [], "river_discharge": []}}
 
-        current = weather.get("current", {})
-        hourly = weather.get("hourly", {})
-        precipitation = [float(x or 0) for x in hourly.get("precipitation", [])]
-        rain24 = sum(precipitation[:24])
+    current = weather.get("current", {})
+    hourly = weather.get("hourly", {})
+    precipitation = [float(x or 0) for x in hourly.get("precipitation", [])]
+    rain24 = sum(precipitation[:24])
 
-        daily = flood.get("daily", {})
-        times = daily.get("time", [])
-        discharges = daily.get("river_discharge", [])
-        pairs = [(t, float(v)) for t, v in zip(times, discharges) if v is not None]
+    daily = flood.get("daily", {})
+    times = daily.get("time", [])
+    discharges = daily.get("river_discharge", [])
+    pairs = [(t, float(v)) for t, v in zip(times, discharges) if v is not None]
 
-        # First value is the earliest returned day; use today's matching date if available.
-        today = flood.get("daily", {}).get("time", [None])[0]
-        river_today = None
-        if pairs:
-            river_today = pairs[0][1]
+    river_today = None
+    if pairs:
+        river_today = pairs[0][1]
 
-        history = [v for _, v in pairs[:-3]] if len(pairs) > 3 else [v for _, v in pairs]
-        history_sorted = sorted(history)
-        river_p90 = history_sorted[max(0, int(0.9 * (len(history_sorted) - 1)))] if history_sorted else None
-        river_rank = percentile_rank(river_today, history) if river_today is not None and history else None
+    history = [v for _, v in pairs[:-3]] if len(pairs) > 3 else [v for _, v in pairs]
+    history_sorted = sorted(history)
+    river_p90 = history_sorted[max(0, int(0.9 * (len(history_sorted) - 1)))] if history_sorted else None
+    river_rank = percentile_rank(river_today, history) if river_today is not None and history else None
 
-        score, factors = risk_score(
-            float(current.get("precipitation") or 0),
-            rain24,
-            river_today,
-            river_p90,
-        )
-        level, msg, warning, cls = classify(score)
+    score, factors = risk_score(
+        float(current.get("precipitation") or 0),
+        rain24,
+        river_today,
+        river_p90,
+    )
+    level, msg, warning, cls = classify(score)
 
-        return {
-            "location": {"latitude": lat, "longitude": lon, "name": None},
-            "weather": {
-                "temperature": float(current.get("temperature_2m") or 0),
-                "current_precipitation": float(current.get("precipitation") or 0),
-                "current_precipitation_definition": "Model-estimated precipitation for the preceding hour",
-                "rain_24h": rain24,
-                "rain_24h_definition": "Sum of the next 24 hourly precipitation forecasts",
-            },
-            "flood": {
-                "river_discharge_today": river_today,
-                "river_discharge_reference_p90": river_p90,
-                "river_discharge_percentile_rank": river_rank,
-                "river_data_definition": "GloFAS-based modelled daily discharge for the largest river/grid cell near the requested coordinates; not a live gauge measurement",
-                "river_source_resolution": "about 5 km",
-                "selection_note": "The nearest river/grid cell may not always represent the exact local river or gauge.",
-            },
-            "risk": {
-                "score": score,
-                "level": level,
-                "message": msg,
-                "warning": warning,
-                "class": cls,
-                "factors": factors,
-            },
-            "sources": [
-                "Open-Meteo Forecast API",
-                "Open-Meteo Flood API (GloFAS-based)",
-            ],
-        }
-    except Exception as e:
-        raise HTTPException(502, detail=f"Environmental data provider error: {e}")
-
+    return {
+        "location": {"latitude": lat, "longitude": lon, "name": None},
+        "weather": {
+            "temperature": float(current.get("temperature_2m") or 0),
+            "current_precipitation": float(current.get("precipitation") or 0),
+            "current_precipitation_definition": "Model-estimated precipitation for the preceding hour",
+            "rain_24h": rain24,
+            "rain_24h_definition": "Sum of the next 24 hourly precipitation forecasts",
+        },
+        "flood": {
+            "river_discharge_today": river_today,
+            "river_discharge_reference_p90": river_p90,
+            "river_discharge_percentile_rank": river_rank,
+            "river_data_definition": "GloFAS-based modelled daily discharge for the largest river/grid cell near the requested coordinates; not a live gauge measurement",
+            "river_source_resolution": "about 5 km",
+            "selection_note": "The nearest river/grid cell may not always represent the exact local river or gauge.",
+        },
+        "risk": {
+            "score": score,
+            "level": level,
+            "message": msg,
+            "warning": warning,
+            "class": cls,
+            "factors": factors,
+        },
+        "sources": [
+            "Open-Meteo Forecast API",
+            "Open-Meteo Flood API (GloFAS-based)",
+        ],
+    }
 
 app.mount("/", StaticFiles(directory=str(BASE / "frontend"), html=True), name="frontend")

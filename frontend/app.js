@@ -1,8 +1,7 @@
 const $ = id => document.getElementById(id);
 let coords = null;
-const API = "/api"; // Local FastAPI fallback for development
+const API = "/api";
 const LAMBDA_API = "https://5uc6zopvibuo27ynqhvu2dsqsy0jhcpn.lambda-url.ap-southeast-2.on.aws";
-const GEOCODE_API = "https://geocoding-api.open-meteo.com/v1/search";
 
 $("locate").onclick = locate;
 $("refresh").onclick = () => coords ? load(coords.lat, coords.lon) : setStatus("● Choose a location first");
@@ -10,6 +9,23 @@ $("searchPlace").onclick = searchPlace;
 $("placeInput").addEventListener("keydown", e => { if (e.key === "Enter") searchPlace(); });
 
 function setStatus(text) { $("status").textContent = text; }
+
+async function requestJson(url) {
+    const response = await fetch(url);
+    const text = await response.text();
+    let payload = {};
+    if (text) {
+        try { payload = JSON.parse(text); }
+        catch (error) {
+            throw new Error("The weather service returned invalid data.");
+        }
+    }
+    if (!response.ok) {
+        const detail = payload.detail || payload.message || "Request failed.";
+        throw new Error(detail);
+    }
+    return payload;
+}
 
 function locate() {
     if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
@@ -58,24 +74,21 @@ async function searchPlace() {
     setStatus("● Searching location...");
     hideSuggestions();
     try {
-        const r = await fetch(`${GEOCODE_API}?name=${encodeURIComponent(q)}&count=5&language=en&format=json`);
-        const raw = await r.json();
-        const d = {
-            results: (raw.results || []).map(x => ({
-                name: x.name,
-                latitude: x.latitude,
-                longitude: x.longitude,
-                display_name: [x.name, x.admin1, x.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ")
-            }))
-        };
-        if (!r.ok || !d.results.length) {
+        const payload = await requestJson(`${API}/geocode?q=${encodeURIComponent(q)}`);
+        const results = (payload.results || []).map(x => ({
+            name: x.name,
+            latitude: x.latitude,
+            longitude: x.longitude,
+            display_name: [x.name, x.admin1, x.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+        }));
+        if (!results.length) {
             throw new Error("Location not found. Try a nearby city or a more specific place.");
         }
-        selectLocation(d.results[0]);
-    } catch (e) {
-        console.error(e);
+        selectLocation(results[0]);
+    } catch (error) {
+        console.error(error);
         setStatus("● Location search failed");
-        $("locationHelp").textContent = e.message;
+        $("locationHelp").textContent = error.message || "Location search failed.";
     }
 }
 
@@ -90,10 +103,9 @@ function selectLocation(x) {
 async function fetchSuggestions(q) {
     if (q.length < 2) { hideSuggestions(); return; }
     try {
-        const r = await fetch(`${GEOCODE_API}?name=${encodeURIComponent(q)}&count=5&language=en&format=json`);
-        const raw = await r.json();
-        if (!r.ok || !Array.isArray(raw.results)) throw new Error("Search unavailable");
-        searchResults = raw.results.map(x => ({
+        const payload = await requestJson(`${API}/geocode?q=${encodeURIComponent(q)}`);
+        if (!Array.isArray(payload.results)) throw new Error("Search unavailable");
+        searchResults = payload.results.map(x => ({
             name: x.name,
             latitude: x.latitude,
             longitude: x.longitude,
@@ -101,8 +113,8 @@ async function fetchSuggestions(q) {
         }));
         activeSuggestion = -1;
         renderSuggestions();
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error(error);
         hideSuggestions();
     }
 }
@@ -188,32 +200,55 @@ updateClearButton();
 async function load(lat, lon) {
     setStatus("● Fetching live environmental data...");
     try {
-        const r = await fetch(`${LAMBDA_API}?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || "Environmental API error");
-        render(d);
+        let responseData = null;
+        try {
+            responseData = await requestJson(`${API}/analyze?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+        } catch (localError) {
+            responseData = await requestJson(`${LAMBDA_API}?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+        }
+        render(responseData);
         setStatus("● Live data connected");
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error(error);
         setStatus("● Data error");
-        $("warning").textContent = e.message;
+        $("warning").textContent = error.message || "The environmental data request failed.";
+        $("riskMsg").textContent = error.message || "The environmental data request failed.";
     }
 }
 
 function render(d) {
-    $("place").textContent = d.location.name || `${d.location.latitude.toFixed(4)}, ${d.location.longitude.toFixed(4)}`;
-    $("coords").textContent = `${d.location.latitude.toFixed(5)}, ${d.location.longitude.toFixed(5)}`;
-    $("rain").textContent = d.weather.current_precipitation.toFixed(1);
-    $("rain24").textContent = d.weather.rain_24h.toFixed(1);
-    $("river").textContent = d.flood.river_discharge_today == null ? "—" : d.flood.river_discharge_today.toFixed(1);
-    $("temp").textContent = d.weather.temperature.toFixed(1);
+    const weather = d.weather || {};
+    const flood = d.flood || {};
+    const risk = d.risk || {};
+    const location = d.location || {};
+    const lat = Number(location.latitude ?? coords?.lat ?? 0);
+    const lon = Number(location.longitude ?? coords?.lon ?? 0);
+
+    $("place").textContent =
+        location.name || (Number.isFinite(lat) && Number.isFinite(lon)
+            ? `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+            : "Current location");
+
+    $("coords").textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    $("rain").textContent = Number(weather.current_precipitation ?? 0).toFixed(1);
+    $("rain24").textContent = Number(weather.rain_24h ?? 0).toFixed(1);
+
+    const riverValue = flood.river_discharge_today;
+    $("river").textContent = riverValue == null || Number.isNaN(Number(riverValue)) ? "—" : Number(riverValue).toFixed(1);
+
+    $("temp").textContent = Number(weather.temperature ?? 0).toFixed(1);
     $("updated").textContent = new Date().toLocaleTimeString();
-    $("risk").textContent = d.risk.level;
-    $("riskMsg").textContent = d.risk.message;
-    $("warning").textContent = d.risk.warning;
-    $("risk").className = d.risk.class;
-    const riverText = d.flood.river_discharge_today == null ? "unavailable" : `${d.flood.river_discharge_today.toFixed(1)} m³/s`;
-    const rankText = d.flood.river_discharge_percentile_rank == null ? "n/a" : `${d.flood.river_discharge_percentile_rank}th percentile` ;
-    $("details").innerHTML = `<span class="pill">Risk score: ${d.risk.score}/100</span><span class="pill">Rain next 24h: ${d.weather.rain_24h.toFixed(1)} mm</span><span class="pill">Modelled river: ${riverText}</span><span class="pill">River context: ${rankText}</span>`;
-    $("dataNote").textContent = d.flood.river_data_definition;
+    $("risk").textContent = risk.level || "LOW RISK";
+    $("riskMsg").textContent = risk.message || "Flood risk data loaded successfully.";
+    $("warning").textContent = risk.warning || "Continue monitoring local conditions.";
+    $("risk").className = String(risk.class || "low");
+
+    $("details").innerHTML = `
+        <span class="pill">Risk score: ${risk.score ?? 0}/100</span>
+        <span class="pill">Rain next 24h: ${Number(weather.rain_24h ?? 0).toFixed(1)} mm</span>
+        <span class="pill">Current rain: ${Number(weather.current_precipitation ?? 0).toFixed(1)} mm</span>
+        <span class="pill">River discharge: ${riverValue == null || Number.isNaN(Number(riverValue)) ? "—" : Number(riverValue).toFixed(1)} m³/s</span>
+    `;
+
+    $("dataNote").textContent = flood.river_data_definition || "Weather and rainfall data provided by Open-Meteo.";
 }
