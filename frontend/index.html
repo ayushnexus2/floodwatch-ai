@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#082f49">
+<title>FloodWatch AI</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div><h1>🌧️ FloodWatch AI</h1><p>Local waterlogging & flood risk early warning</p></div><span id="status">● Ready</span></header>
+<main>
+<section class="hero">
+<div>
+<div class="badge">AWS Environmental Hackathon Prototype</div>
+<h2>Know the risk before the water rises.</h2>
+<p>Real-time rainfall, forecast and river-discharge signals converted into a transparent local risk score.</p>
+<div class="location-actions">
+<button id="locate">📍 Detect my location</button>
+<button id="refresh" class="secondary">↻ Refresh data</button>
+</div>
+<div class="manual-box">
+<label for="placeInput">Search any city, town, village or locality</label>
+<div class="search-row">
+  <div class="search-input-wrap">
+    <span class="search-icon">⌕</span>
+    <input id="placeInput" type="search" placeholder="Search e.g. Delhi, Kolkata, Dehradun..." autocomplete="off" spellcheck="false">
+    <button id="clearSearch" class="clear-btn" type="button" aria-label="Clear search">×</button>
+    <div id="searchSuggestions" class="suggestions" role="listbox" aria-label="Location suggestions"></div>
+  </div>
+  <button id="searchPlace" type="button">Search</button>
+</div>
+<small id="locationHelp">Type a place and select a result, or press Enter. GPS is optional.</small>
+</div>
+</div>
+<div class="hero-card"><span>Risk status</span><strong id="risk">LOCATION NEEDED</strong><small id="riskMsg">Choose GPS or search for a location.</small></div>
+</section>
+<section class="grid">
+<article><span>📍 Location</span><b id="place">Not detected</b><small id="coords">—</small></article>
+<article><span>🌧️ Current precipitation</span><b id="rain">—</b><small>mm</small></article>
+<article><span>💧 Next 24h rain</span><b id="rain24">—</b><small>mm</small></article>
+<article><span>🌊 Modelled river discharge</span><b id="river">—</b><small>m³/s · GloFAS model</small></article>
+<article><span>🌡️ Temperature</span><b id="temp">—</b><small>°C</small></article>
+<article><span>⏱️ Last update</span><b id="updated">—</b><small>local time</small></article>
+</section>
+<section class="panel"><h2>⚠️ Early warning</h2><p id="warning">No warning available yet.</p><div id="details" class="details"></div><div id="dataNote" class="data-note">River discharge is modelled, not a live gauge reading.</div></section>
+<section class="panel"><h2>How the risk engine works</h2><div class="steps"><div><b>01</b><span>GPS or location search</span></div><div><b>02</b><span>Live weather</span></div><div><b>03</b><span>Rain + modelled river signals</span></div><div><b>04</b><span>Risk & warning</span></div></div><p class="note">This is an environmental decision-support prototype, not an official emergency warning system. Always follow local government and disaster-management alerts.</p></section>
+</main><footer>FloodWatch AI · Real environmental data · Built for cross-platform web browsers</footer>
+<script src="app.js"></script>
+</body></html>
